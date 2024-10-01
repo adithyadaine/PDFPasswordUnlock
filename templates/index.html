@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Unlocker</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .upload-container {
+            max-width: 500px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .upload-icon {
+            font-size: 48px;
+            color: #0d6efd;
+            margin-bottom: 1rem;
+        }
+        footer {
+            text-align: center;
+            margin-top: 2rem;
+            color: #6c757d;
+        }
+        .form-container {
+            margin-top: 2rem;
+        }
+    </style>
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="upload-container">
+            <div class="header">
+                <i class="bi bi-file-earmark-pdf upload-icon"></i>
+                <h1 class="h3">PDF Unlocker</h1>
+                <p class="text-muted">Remove password protection from your PDF files</p>
+            </div>
+            
+            <div class="form-container">
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="pdf_file" class="form-label">Select PDF file</label>
+                        <input type="file" class="form-control" id="pdf_file" name="pdf_file" accept=".pdf" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">PDF Password (if needed)</label>
+                        <input type="password" class="form-control" id="password" name="password" 
+                               placeholder="Enter the PDF password">
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-unlock me-2"></i>Unlock PDF
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <footer>
+            <p>© 2024 PDF Unlocker. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <!-- Bootstrap JavaScript Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Optional: Add some interactivity -->
+    <script>
+        document.getElementById('pdf_file').addEventListener('change', function(e) {
+            const fileName = e.target.files[0]?.name;
+            const submitBtn = document.querySelector('button[type="submit"]');
+            if (fileName) {
+                submitBtn.innerHTML = `<i class="bi bi-unlock me-2"></i>Unlock ${fileName}`;
+            } else {
+                submitBtn.innerHTML = `<i class="bi bi-unlock me-2"></i>Unlock PDF`;
+            }
+        });
+    </script>
+</body>
+</html>
