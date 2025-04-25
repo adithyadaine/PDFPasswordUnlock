@@ -4,7 +4,16 @@ import io
 import logging
 import os
 import time
-# import sys # No longer needed
+import uuid # For generating unique IDs
+from threading import Lock # For basic thread safety on the dictionary
+
+# --- Temporary Storage (In-Memory) ---
+# WARNING: This is simple but not robust for production with multiple workers
+# or long-running processes. Data is lost on restart. Consider Redis or
+# a temporary file system with cleanup for production.
+temp_unlocked_files = {}
+temp_file_lock = Lock()
+# -------------------------------------
 
 # Set up logging
 logging.basicConfig(
@@ -27,16 +36,20 @@ def start_timer():
 
 @app.after_request
 def log_request(response):
-    if request.path != '/health':  # Don't log health checks
-        now = time.time()
-        duration = round(now - g.start, 2)
-        log_params = {
-            'method': request.method,
-            'path': request.path,
-            'status': response.status_code,
-            'duration': duration,
-            'ip': request.headers.get('X-Forwarded-For', request.remote_addr),
-        }
+    # Log all requests now, including successful AJAX and downloads
+    now = time.time()
+    duration = round(now - g.start, 2)
+    log_params = {
+        'method': request.method,
+        'path': request.path,
+        'status': response.status_code,
+        'duration': duration,
+        'ip': request.headers.get('X-Forwarded-For', request.remote_addr),
+    }
+    # Don't log file data for downloads
+    if request.path.startswith('/download/'):
+         logger.info(f"Download Request: {log_params}")
+    else:
         logger.info(f"Request: {log_params}")
     return response
 
@@ -47,127 +60,141 @@ def health_check():
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    # --- Handle POST requests via AJAX ---
     if request.method == 'POST':
+        original_pdf = None # Ensure cleanup happens
         try:
-            logger.debug("Starting PDF processing")
+            logger.debug("Starting PDF processing (AJAX)")
 
             if 'pdf_file' not in request.files:
-                flash('No file uploaded', 'danger')
-                return redirect(url_for('index'))
+                logger.warning("AJAX POST: No file part")
+                return jsonify({"success": False, "error": "No file uploaded"}), 400
 
             file = request.files['pdf_file']
-            password = request.form['password']
+            password = request.form.get('password', '') # Use .get for safety
 
             if file.filename == '':
-                flash('No file selected', 'danger')
-                return redirect(url_for('index'))
+                logger.warning("AJAX POST: No file selected")
+                return jsonify({"success": False, "error": "No file selected"}), 400
 
             if not file.filename.lower().endswith('.pdf'):
-                flash('Please upload a PDF file', 'danger')
-                return redirect(url_for('index'))
+                logger.warning(f"AJAX POST: Invalid file type: {file.filename}")
+                return jsonify({"success": False, "error": "Please upload a PDF file"}), 400
 
-            # Check file size
-            file.seek(0, io.SEEK_END)
-            file_size = file.tell()
-            file.seek(0)
+            # Check file size (read into memory - careful with very large limits)
+            pdf_data = file.read()
+            file_size = len(pdf_data)
+
+            if file_size == 0:
+                 logger.warning("AJAX POST: Empty file uploaded")
+                 return jsonify({"success": False, "error": "Empty file uploaded"}), 400
 
             if file_size > MAX_FILE_SIZE:
-                flash(f'File too large. Maximum size is {MAX_FILE_SIZE/1024/1024:.1f}MB', 'danger')
-                return redirect(url_for('index'))
+                logger.warning(f"AJAX POST: File too large: {file_size} bytes")
+                return jsonify({"success": False, "error": f'File too large. Maximum size is {MAX_FILE_SIZE/1024/1024:.1f}MB'}), 413 # Payload Too Large
 
+            # --- PDF Processing Logic ---
             try:
-                # Read the PDF file
-                pdf_data = file.read()
-
-                # Open the PDF with PyMuPDF
                 original_pdf = fitz.open(stream=pdf_data, filetype="pdf")
-                logger.debug(f"PDF opened successfully. Encrypted: {original_pdf.is_encrypted}")
+                logger.debug(f"PDF opened. Encrypted: {original_pdf.is_encrypted}")
 
-                # Check if the PDF is encrypted
                 if original_pdf.is_encrypted:
-                    logger.debug("PDF is encrypted. Checking for password.")
-                    # Check if password was provided for encrypted PDF
                     if not password:
-                        logger.warning("Encrypted PDF uploaded, but no password provided.")
-                        flash('This PDF is password-protected. Please provide the password.', 'warning')
-                        original_pdf.close() # Close the document before redirecting
-                        return redirect(url_for('index'))
+                        logger.warning("AJAX POST: Password required but not provided.")
+                        # No need to close original_pdf here, finally block handles it
+                        return jsonify({"success": False, "error": "This PDF is password-protected. Please provide the password."}), 422 # Unprocessable Entity
 
-                    logger.debug("Attempting to decrypt PDF with provided password.")
-                    try:
-                        # Attempt authentication
-                        if not original_pdf.authenticate(password):
-                            logger.warning("Incorrect password provided.")
-                            flash('Incorrect password provided.', 'danger')
-                            original_pdf.close() # Close the document before redirecting
-                            return redirect(url_for('index'))
-                        # If authentication succeeds, PyMuPDF removes encryption internally for this object
-                        logger.debug("PDF decrypted successfully with password.")
-                    except Exception as e:
-                        # This might catch rare errors during the authentication process itself
-                        logger.error(f"Error during password authentication: {str(e)}")
-                        flash('Error decrypting PDF. Please check the password or the file.', 'danger')
-                        original_pdf.close() # Close the document before redirecting
-                        return redirect(url_for('index'))
-                else:
-                    logger.debug("PDF is not encrypted.")
+                    logger.debug("Attempting authentication")
+                    if not original_pdf.authenticate(password):
+                        logger.warning("AJAX POST: Incorrect password.")
+                        # No need to close original_pdf here, finally block handles it
+                        return jsonify({"success": False, "error": "Incorrect password provided."}), 422 # Unprocessable Entity
+                    logger.debug("Authentication successful.")
 
-                # Create a new PDF document (this effectively saves without encryption)
-                logger.debug("Creating new unlocked PDF")
-                output_pdf = fitz.open()
-                output_pdf.insert_pdf(original_pdf)
-                logger.debug(f"New PDF created. Page count: {output_pdf.page_count}")
-
-                # Save to bytes
+                # Create unlocked PDF
+                output_pdf_doc = fitz.open()
+                output_pdf_doc.insert_pdf(original_pdf)
                 output_buffer = io.BytesIO()
-                # Optional: Experiment with save options if quality issues persist
-                output_pdf.save(output_buffer) # , garbage=4, deflate=True)
-                output_buffer.seek(0)
+                output_pdf_doc.save(output_buffer)
+                output_pdf_doc.close()
+                output_pdf_data = output_buffer.getvalue()
 
-                # Close both PDF documents
-                original_pdf.close()
-                output_pdf.close()
+                # --- Store temporarily ---
+                download_id = str(uuid.uuid4())
+                with temp_file_lock:
+                    temp_unlocked_files[download_id] = {
+                        "data": output_pdf_data,
+                        "filename": f'unlocked_{file.filename}',
+                        "timestamp": time.time()
+                        # Add cleanup logic here if needed (e.g., based on timestamp)
+                    }
+                logger.info(f"Stored unlocked file with ID: {download_id}")
 
-                logger.info(f"Successfully processed and unlocked '{file.filename}'")
-
-                # --- Flash success message ---
-                flash(f'Successfully unlocked "{file.filename}"!', 'success')
-                # ---------------------------
-
-                return send_file(
-                    output_buffer,
-                    as_attachment=True,
-                    download_name=f'unlocked_{file.filename}',
-                    mimetype='application/pdf'
-                )
+                return jsonify({
+                    "success": True,
+                    "message": f'Successfully unlocked "{file.filename}"!',
+                    "download_id": download_id
+                }), 200
 
             except fitz.FileDataError:
-                logger.warning(f"Invalid or corrupted PDF file uploaded: {file.filename}")
-                flash('Invalid or corrupted PDF file', 'danger')
-                return redirect(url_for('index'))
+                logger.warning(f"AJAX POST: Invalid or corrupted PDF: {file.filename}")
+                return jsonify({"success": False, "error": "Invalid or corrupted PDF file"}), 422
+            except Exception as e: # Catch auth errors or other fitz errors
+                 logger.error(f"Error during PDF processing/auth: {str(e)}", exc_info=True)
+                 return jsonify({"success": False, "error": "Error processing PDF. Check password or file."}), 500
+            finally:
+                 if original_pdf:
+                     original_pdf.close() # Ensure original PDF is closed
 
         except Exception as e:
-            logger.error(f"An unexpected error occurred during POST: {str(e)}", exc_info=True)
-            flash('An unexpected error occurred. Please try again.', 'danger')
-            return redirect(url_for('index'))
+            logger.error(f"Unexpected error during AJAX POST: {str(e)}", exc_info=True)
+            return jsonify({"success": False, "error": "An unexpected server error occurred."}), 500
 
-    # GET request or initial page load
+    # --- Handle GET requests (initial page load) ---
+    # Flash messages might still be useful if navigating directly after an action
+    # or for non-AJAX errors, though less common now.
     return render_template('index.html')
 
-# Error handlers
+
+# --- New Download Route ---
+@app.route('/download/<download_id>')
+def download_file(download_id):
+    logger.debug(f"Download request received for ID: {download_id}")
+    file_info = None
+    with temp_file_lock:
+        # Use .pop() to retrieve and remove the item atomically (if found)
+        file_info = temp_unlocked_files.pop(download_id, None)
+
+    if file_info:
+        logger.info(f"Serving file for download ID: {download_id}, Filename: {file_info['filename']}")
+        return send_file(
+            io.BytesIO(file_info["data"]),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=file_info["filename"]
+        )
+    else:
+        logger.warning(f"Download ID not found or already used: {download_id}")
+        flash("Download link expired or invalid.", "warning") # Flash for the redirect
+        return redirect(url_for('index')) # Redirect back to main page
+
+
+# Error handlers (keep these, they handle direct access errors etc.)
 @app.errorhandler(404)
 def not_found_error(error):
     logger.warning(f"404 Not Found error for path: {request.path}")
-    return render_template('index.html'), 404 # Consider a dedicated 404.html
+    # Check if request expects JSON (AJAX) or HTML
+    if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+        return jsonify(error='Not Found'), 404
+    return render_template('index.html'), 404 # Or a dedicated 404.html
 
 @app.errorhandler(500)
 def internal_error(error):
     logger.error(f"500 Internal Server Error: {error}", exc_info=True)
-    return render_template('index.html'), 500 # Consider a dedicated 500.html
+    if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+        return jsonify(error='Internal Server Error'), 500
+    return render_template('index.html'), 500 # Or a dedicated 500.html
 
 if __name__ == '__main__':
-    # This will only be used when running locally
     port = int(os.environ.get('PORT', 10000))
-    # Use debug=True for development (auto-reload, detailed errors)
-    # WARNING: Do NOT use debug=True in a production environment!
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True) # Keep debug=True for development

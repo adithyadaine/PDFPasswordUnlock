@@ -1,0 +1,42 @@
+/* static/css/style.css */
+body {
+    background-color: #f8f9fa;
+  }
+  .upload-container {
+    max-width: 500px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background-color: white;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  }
+  .header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+  .upload-icon {
+    font-size: 48px;
+    color: #0d6efd;
+    margin-bottom: 1rem;
+  }
+  footer {
+    text-align: center;
+    margin-top: 2rem;
+    color: #6c757d;
+  }
+  .form-container {
+    margin-top: 2rem;
+  }
+  /* Style for loading spinner */
+  .spinner-border-sm {
+    margin-right: 0.5rem;
+  }
+  /* Area for messages */
+  #message-area {
+    margin-top: 1.5rem;
+    /* Ensure alerts have some bottom margin if they stack */
+    & .alert + .alert {
+        margin-top: 1rem;
+    }
+  }
+    
