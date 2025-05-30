@@ -1,6 +1,11 @@
 /* static/css/style.css */
 body {
     background-color: #f8f9fa;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 80vh;
   }
   .upload-container {
     max-width: 500px;
@@ -19,11 +24,29 @@ body {
     color: #0d6efd;
     margin-bottom: 1rem;
   }
-  footer {
+  /* footer {
     text-align: center;
     margin-top: 2rem;
     color: #6c757d;
-  }
+  } */
+
+  footer {
+  background-color: var(--header-footer-background);
+  color: #6c757d;
+  padding: 1.1rem 1.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  z-index: 100;
+  /* border-top: 1px solid var(--header-footer-border); */ /* Optional */
+}
+footer p {
+  margin: 0;
+}
   .form-container {
     margin-top: 2rem;
   }
