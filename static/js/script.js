@@ -107,3 +107,9 @@ uploadForm.addEventListener("submit", async (event) => {
     submitButton.disabled = false;
   }
 });
+
+// Automatically update the year in the footer
+const currentYearElement = document.getElementById("current-year");
+if (currentYearElement) {
+  currentYearElement.textContent = new Date().getFullYear();
+}
